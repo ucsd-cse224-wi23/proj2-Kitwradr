@@ -2,8 +2,6 @@ package tritonhttp
 
 import (
 	"bufio"
-	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -69,7 +67,7 @@ func listenForClientConnections(address string, hosts map[string]string) {
 			//os.Exit(1)
 			continue
 		}
-
+		fmt.Println("Creating a goroutine to service new request from ", conn.RemoteAddr().String())
 		go handleClientConnection(conn, hosts)
 	}
 }
@@ -86,25 +84,25 @@ func parseRequestLine(line string) (string, error) {
 func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 
 	//defer conn.Close() Do not defer because it is persistenet connections
+	start := time.Now()
+	br := bufio.NewReader(conn)
 	for {
+		fmt.Println("coming in for loop")
 		// Set timeout
+		start := time.Now()
 		if err := conn.SetReadDeadline(time.Now().Add(RECV_TIMEOUT)); err != nil {
-			log.Printf("Failed to set timeout for connection %v", conn)
+			fmt.Println("Failed to set timeout for connection %v", conn)
 			_ = conn.Close()
 			break
 		}
 
 		// Read next request from the client
 		var read_buffer []byte
-		response, err := ReadRequest(conn, &read_buffer, hosts_config)
+		response, err := ReadRequest(br, &read_buffer, hosts_config)
 
-		// resetting size  TODO : HAVE TO MOVE THIS BELOW
-		read_buffer = make([]byte, 0)
-		fmt.Println("length of read buffer", len(read_buffer))
 
-		// Handle EOF
-		if errors.Is(err, io.EOF) {
-			log.Printf("Connection closed by %v", conn.RemoteAddr())
+		if err == io.EOF {
+			fmt.Println("Connection closed by %v", conn.RemoteAddr())
 			_ = conn.Close()
 			break
 		}
@@ -131,40 +129,53 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		fmt.Println("Response ", response)
 
 		err = response.Write(conn)
+		duration := time.Since(start)
+		fmt.Println("Time elapsed", duration, "\n--------------------------------------")
 		if err != nil {
 			fmt.Println("Error writing into conn", err)
 		}
 
 	}
+	duration := time.Since(start)
+	fmt.Println("Time elapsed for closing connection", duration)
 	fmt.Println("closing connection")
 
 }
 
-func ReadRequest(conn net.Conn, read_buffer *[]byte, hosts_config map[string]string) (resp Response, err error) {
-	var response Response
-	delimiter := []byte("\r\n\r\n")
-	var full_request = read_buffer
-	for {
-		temp := make([]byte, 100)
-		_, err := conn.Read(temp)
+func ReadRequest2(br *bufio.Reader) (req string, err error) {
 
-		//fmt.Println("Bytes read --> \n", bytes_read, string(temp))
-		*full_request = append(*full_request, temp...)
-		//time.Sleep(6 * time.Second)
-		if bytes.Contains(temp, delimiter) { // break if delimiter exists
-			
+	var full_request string
+	for {
+		fmt.Println("for loop in read request 2")
+		line, err := ReadLine(br)
+		if err != nil {
+			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
+			return "", err
+		}
+		if line == "" {
+			// This marks header end
+			fmt.Println("Encountered empty line")
 			break
 		}
-		if err != nil {
-			fmt.Println("Error occured", err)
-			return response, err
-		}
-
+		full_request += (line + "\r\n")
+		fmt.Println("Read line from request", line)
 	}
 
-	response = parseRequest(*full_request, hosts_config)
+	fmt.Println("Full request from ", getCurrentFunctionName(), "\n", full_request)
 
-	return response, nil
+	return full_request, err
+}
+
+func ReadRequest(br *bufio.Reader, read_buffer *[]byte, hosts_config map[string]string) (resp Response, err error) {
+	var response Response
+
+	//br := bufio.NewReader(conn)
+
+	full_request, err := ReadRequest2(br)
+
+	response = parseRequest([]byte(full_request), hosts_config)
+
+	return response, err
 }
 
 // HandleBadRequest prepares res to be a 405 Method Not allowed response
@@ -194,7 +205,16 @@ func parseRequest(requestBytes []byte, hosts_config map[string]string) Response 
 
 	arr_lines := strings.Split(converted_req, "\r\n")
 	//Removing 2 lines created by last delimiter
-	arr_lines = arr_lines[0 : len(arr_lines)-2]
+
+	num_lines := len(arr_lines)
+
+	fmt.Println("Number of arr_lines ", len(arr_lines))
+	if num_lines == 0 || (num_lines == 1 && arr_lines[0] == "") {
+		response.HandleBadRequest()
+		return response
+	}
+
+	arr_lines = arr_lines[0 : len(arr_lines)-2] // there is one empty line after splitting by delimiter
 
 	if len(arr_lines) == 0 { //There should be at least one line
 		response.HandleBadRequest()
@@ -394,7 +414,7 @@ func (res *Response) Write(w io.Writer) error {
 	res.Headers["Date"] = FormatTime(time.Now())
 	if res.Request != nil {
 		value, exists := res.Request.Headers["Connection"]
-		fmt.Println("value of connection close", value)
+		//fmt.Println("value of connection close", value)
 		if exists {
 			if value == "close" {
 				res.Headers["Connection"] = "close"
@@ -449,6 +469,8 @@ func (res *Response) Write(w io.Writer) error {
 
 		}
 
+	} else {
+		bw.WriteString("\r\n\r\n")
 	}
 
 	if err := bw.Flush(); err != nil {
