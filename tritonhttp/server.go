@@ -97,9 +97,7 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		}
 
 		// Read next request from the client
-		var read_buffer []byte
-		response, err := ReadRequest(br, &read_buffer, hosts_config)
-
+		response, err := ReadRequest(br, hosts_config)
 
 		if err == io.EOF {
 			fmt.Println("Connection closed by %v", conn.RemoteAddr())
@@ -112,8 +110,8 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			log.Printf("Connection to %v timed out", conn.RemoteAddr())
 			// writing 400 into new response and closing connection
-			if len(read_buffer) != 0 {
-				fmt.Println("Number of unread bytes in read_buffer", len(read_buffer))
+			if br.Size() != 0 {
+				fmt.Println("Number of unread bytes in read_buffer", br.Size())
 				var response Response
 				response.HandleBadRequest()
 				err := response.Write(conn)
@@ -128,11 +126,23 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		fmt.Println("Writing into conn good request")
 		fmt.Println("Response ", response)
 
+		if response.Request != nil && response.Request.Close {
+			fmt.Println("Adding close header in Response")
+			if response.Headers != nil {
+				response.Headers["Connection"] = "close"
+			}
+		}
+
 		err = response.Write(conn)
 		duration := time.Since(start)
 		fmt.Println("Time elapsed", duration, "\n--------------------------------------")
 		if err != nil {
 			fmt.Println("Error writing into conn", err)
+		}
+		if response.Request != nil && response.Request.Close {
+			fmt.Println("Closing connection because of close header")
+			conn.Close()
+			break
 		}
 
 	}
@@ -166,10 +176,8 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 	return full_request, err
 }
 
-func ReadRequest(br *bufio.Reader, read_buffer *[]byte, hosts_config map[string]string) (resp Response, err error) {
+func ReadRequest(br *bufio.Reader, hosts_config map[string]string) (resp Response, err error) {
 	var response Response
-
-	//br := bufio.NewReader(conn)
 
 	full_request, err := ReadRequest2(br)
 
@@ -214,14 +222,17 @@ func parseRequest(requestBytes []byte, hosts_config map[string]string) Response 
 		return response
 	}
 
-	arr_lines = arr_lines[0 : len(arr_lines)-2] // there is one empty line after splitting by delimiter
+	arr_lines = arr_lines[0 : len(arr_lines)-1] // there is one empty line after splitting by delimiter
 
 	if len(arr_lines) == 0 { //There should be at least one line
+		fmt.Println("No headers present")
 		response.HandleBadRequest()
 		return response
 	}
 
 	var request Request
+
+	fmt.Println("Number of headers are ", len(arr_lines))
 
 	status_code := validateHeaders(arr_lines, &request, &response)
 
@@ -247,7 +258,7 @@ func validateHeaders(allLines []string, request *Request, response *Response) (S
 	req_headers := make(map[string]string)
 
 	for _, line := range allLines {
-		//fmt.Println("Checking for header", line, strings.Contains(line, ":"))
+		fmt.Println("---Checking for header---\n", line)
 		//line should contain ":"
 		if !strings.Contains(line, ":") {
 			fmt.Println("Missing :")
@@ -256,7 +267,7 @@ func validateHeaders(allLines []string, request *Request, response *Response) (S
 
 		line_split := strings.Split(line, ":")
 		if len(line_split) > 2 {
-			fmt.Println("More than 2")
+			fmt.Println("More than 2 items in header split")
 			return statusBadRequest
 		}
 
@@ -283,10 +294,17 @@ func validateHeaders(allLines []string, request *Request, response *Response) (S
 			request.Host = value
 		}
 		if key == "Connection" {
-			request.Close = value != "close"
+			fmt.Println("Connection close header is present in the request")
+			request.Close = (value == "close" || value == "Close")
 		}
 
 		req_headers[key] = value
+		fmt.Println("---End of line--")
+	}
+
+	if request.Host == "" {
+		fmt.Println("Host missing in headers")
+		return statusBadRequest
 	}
 
 	request.Headers = req_headers
@@ -305,6 +323,7 @@ func isAlphaNumHyphen(str string) bool {
 			return false
 		}
 	}
+	//fmt.Println("Valid key", str)
 	return true
 }
 
@@ -355,6 +374,9 @@ func validateURL(url string, doc_root string) (cleaned_url string, status int) {
 	if url[len(url)-1] == '/' {
 		url += index_file
 	}
+
+	combined_path := abs_path + url
+	fmt.Println("Absolute path is", abs_path, "\nCombined path is ", combined_path)
 
 	file_path := filepath.Clean(abs_path + url)
 
@@ -420,6 +442,8 @@ func (res *Response) Write(w io.Writer) error {
 				res.Headers["Connection"] = "close"
 			}
 		}
+	} else {
+		fmt.Println("Request in response object is nil!")
 	}
 
 	if res.StatusCode == statusBadRequest {
@@ -469,8 +493,6 @@ func (res *Response) Write(w io.Writer) error {
 
 		}
 
-	} else {
-		bw.WriteString("\r\n\r\n")
 	}
 
 	if err := bw.Flush(); err != nil {
@@ -484,4 +506,28 @@ func getCurrentFunctionName() string {
 	pc, _, _, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 	return funcName
+}
+
+// ReadLine reads a single line ending with "\r\n" from br,
+// striping the "\r\n" line end from the returned string.
+// If any error occurs, data read before the error is also returned.
+// You might find this function useful in parsing requests.
+func ReadLine(br *bufio.Reader) (string, error) {
+	var line string
+	for {
+		log.Println("for loop in read line")
+		s, err := br.ReadString('\n')
+		log.Println("after read string in for loop")
+		line += s
+		// Return the error
+		if err != nil {
+			return line, err
+		}
+		// Return the line when reaching line end
+		if strings.HasSuffix(line, "\r\n") {
+			// Striping the line end
+			line = line[:len(line)-2]
+			return line, nil
+		}
+	}
 }
