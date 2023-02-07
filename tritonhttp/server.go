@@ -143,14 +143,11 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		if err != nil {
 			fmt.Println("Error writing into conn", err)
 		}
-		// if response.Request != nil && response.Request.Close {
-		// 	fmt.Println("Closing connection because of close header")
-		// 	conn.Close()
-		// 	break
-		// }
-		//Resetting buffered reader
-		// br.Reset(conn)
-		// fmt.Println("Reset the buffer. New size is", br.Size())
+		if response.Request != nil && response.Request.Close {
+			fmt.Println("Closing connection because of close header")
+			conn.Close()
+			break
+		}
 
 		fmt.Println("**************END**************")
 
@@ -425,7 +422,7 @@ func getHeaderLines(allLines []string) []string {
 
 // ListenAndServe listens on the TCP network address s.Addr and then
 // handles requests on incoming connections.
-func (s *Server) ListenAndServe() error{
+func (s *Server) ListenAndServe() error {
 
 	// Hint: Validate all docRoots
 
@@ -462,11 +459,6 @@ func (res *Response) Write(w io.Writer) error {
 		fmt.Println("Request in response object is nil!")
 	}
 
-	if res.StatusCode == statusBadRequest {
-		res.Headers["Connection"] = "close"
-	}
-
-	//fmt.Println("status being received", res.StatusCode)
 	if res.StatusCode == statusOK {
 
 		file_info, err := os.Stat(res.FilePath)
@@ -482,13 +474,8 @@ func (res *Response) Write(w io.Writer) error {
 		res.Headers["Content-Length"] = strconv.Itoa((int(file_info.Size())))
 
 		// write headers into buffer
-		//sortAndWrite(res.Headers, bw)
-		for key := range res.Headers {
-			_, err = bw.WriteString(key + ": " + res.Headers[key] + "\r\n")
-			if err != nil {
-				return err
-			}
-		}
+		sortAndWrite(res.Headers, bw)
+
 		_, err = bw.WriteString("\r\n")
 		if err != nil {
 			return err
@@ -518,6 +505,24 @@ func (res *Response) Write(w io.Writer) error {
 				return err
 			}
 
+		}
+
+	} else if res.StatusCode == statusBadRequest {
+
+		_, err := bw.WriteString("Date" + ": " + res.Headers["Date"] + "\r\n")
+		if err != nil {
+			return err
+		}
+		_, err = bw.WriteString("Connection" + ": " + "close" + "\r\n\r\n") // adding one more \r\n in the end
+		if err != nil {
+			return err
+		}
+
+	} else if res.StatusCode == statusFileNotFound {
+		sortAndWrite(res.Headers, bw)
+		_, err := bw.WriteString("\r\n") // adding one more \r\n in the end
+		if err != nil {
+			return err
 		}
 
 	}
