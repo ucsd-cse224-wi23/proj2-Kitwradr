@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -87,7 +88,7 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 	start := time.Now()
 	br := bufio.NewReader(conn)
 	for {
-		fmt.Println("coming in for loop")
+		//fmt.Println("coming in for loop")
 		// Set timeout
 		start := time.Now()
 		if err := conn.SetReadDeadline(time.Now().Add(RECV_TIMEOUT)); err != nil {
@@ -156,7 +157,7 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 
 	var full_request string
 	for {
-		fmt.Println("for loop in read request 2")
+		//fmt.Println("for loop in read request 2")
 		line, err := ReadLine(br)
 		if err != nil {
 			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
@@ -466,9 +467,10 @@ func (res *Response) Write(w io.Writer) error {
 		res.Headers["Content-Length"] = strconv.Itoa((int(file_info.Size())))
 
 		// write headers into buffer
-		for key := range res.Headers {
-			bw.WriteString(key + ": " + res.Headers[key] + "\r\n")
-		}
+		sortAndWrite(res.Headers, bw)
+		// for key := range res.Headers {
+		// 	bw.WriteString(key + ": " + res.Headers[key] + "\r\n")
+		// }
 		bw.WriteString("\r\n")
 
 		fp, err := os.Open(res.FilePath)
@@ -515,9 +517,9 @@ func getCurrentFunctionName() string {
 func ReadLine(br *bufio.Reader) (string, error) {
 	var line string
 	for {
-		log.Println("for loop in read line")
+		//log.Println("for loop in read line")
 		s, err := br.ReadString('\n')
-		log.Println("after read string in for loop")
+		//log.Println("after read string in for loop")
 		line += s
 		// Return the error
 		if err != nil {
@@ -529,5 +531,26 @@ func ReadLine(br *bufio.Reader) (string, error) {
 			line = line[:len(line)-2]
 			return line, nil
 		}
+	}
+}
+
+func sortAndWrite(slice map[string]string, bw *bufio.Writer) {
+	var keys []string
+	for key := range slice {
+		keys = append(keys, key)
+	}
+
+	// sort the keys in ascending order
+	sort.Strings(keys)
+
+	// create a new map from the sorted keys
+	sortedMap := make(map[string]string)
+	for _, key := range keys {
+		sortedMap[key] = slice[key]
+	}
+
+	// print the sorted map
+	for key, value := range sortedMap {
+		bw.WriteString(key + ": " + value + "\r\n")
 	}
 }
