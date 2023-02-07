@@ -73,14 +73,14 @@ func listenForClientConnections(address string, hosts map[string]string) {
 	}
 }
 
-func parseRequestLine(line string) (string, error) {
-	fields := strings.SplitN(line, " ", 2)
-	if len(fields) != 2 {
-		return "", fmt.Errorf("could not parse the request line")
-	}
+// func parseRequestLine(line string) (string, error) {
+// 	fields := strings.SplitN(line, " ", 2)
+// 	if len(fields) != 2 {
+// 		return "", fmt.Errorf("could not parse the request line")
+// 	}
 
-	return fields[0], nil
-}
+// 	return fields[0], nil
+// }
 
 func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 
@@ -91,17 +91,18 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		//fmt.Println("coming in for loop")
 		// Set timeout
 		start := time.Now()
-		if err := conn.SetReadDeadline(time.Now().Add(RECV_TIMEOUT)); err != nil {
-			fmt.Println("Failed to set timeout for connection %v", conn)
+		fmt.Println("*************BEGIN*************")
+		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			fmt.Println("Failed to set timeout for connection", conn)
 			_ = conn.Close()
 			break
 		}
 
 		// Read next request from the client
-		response, err := ReadRequest(br, hosts_config)
+		response, err, empty := ReadRequest(br, hosts_config)
 
 		if err == io.EOF {
-			fmt.Println("Connection closed by %v", conn.RemoteAddr())
+			fmt.Println("Connection closed by", conn.RemoteAddr())
 			_ = conn.Close()
 			break
 		}
@@ -111,7 +112,7 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		if err, ok := err.(net.Error); ok && err.Timeout() {
 			log.Printf("Connection to %v timed out", conn.RemoteAddr())
 			// writing 400 into new response and closing connection
-			if br.Size() != 0 {
+			if !empty {
 				fmt.Println("Number of unread bytes in read_buffer", br.Size())
 				var response Response
 				response.HandleBadRequest()
@@ -124,7 +125,6 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 			break
 		}
 
-		fmt.Println("Writing into conn good request")
 		fmt.Println("Response ", response)
 
 		if response.Request != nil && response.Request.Close {
@@ -135,16 +135,24 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		}
 
 		err = response.Write(conn)
+		if err != nil {
+			fmt.Println("error occured writing request into connection buffer:", err)
+		}
 		duration := time.Since(start)
-		fmt.Println("Time elapsed", duration, "\n--------------------------------------")
+		fmt.Println("Time elapsed for this request is -->", duration)
 		if err != nil {
 			fmt.Println("Error writing into conn", err)
 		}
-		if response.Request != nil && response.Request.Close {
-			fmt.Println("Closing connection because of close header")
-			conn.Close()
-			break
-		}
+		// if response.Request != nil && response.Request.Close {
+		// 	fmt.Println("Closing connection because of close header")
+		// 	conn.Close()
+		// 	break
+		// }
+		//Resetting buffered reader
+		// br.Reset(conn)
+		// fmt.Println("Reset the buffer. New size is", br.Size())
+
+		fmt.Println("**************END**************")
 
 	}
 	duration := time.Since(start)
@@ -161,7 +169,7 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 		line, err := ReadLine(br)
 		if err != nil {
 			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
-			return "", err
+			return line, err
 		}
 		if line == "" {
 			// This marks header end
@@ -172,19 +180,25 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 		fmt.Println("Read line from request", line)
 	}
 
-	fmt.Println("Full request from ", getCurrentFunctionName(), "\n", full_request)
+	//fmt.Println("Full request from ", getCurrentFunctionName(), "\n", full_request)
 
 	return full_request, err
 }
 
-func ReadRequest(br *bufio.Reader, hosts_config map[string]string) (resp Response, err error) {
+// returns if the buffer was empty when error occured
+func ReadRequest(br *bufio.Reader, hosts_config map[string]string) (resp Response, err error, empty bool) {
 	var response Response
 
-	full_request, err := ReadRequest2(br)
+	full_request, err := ReadRequest2(br) // when error occurs ReadRequest2 returns only the last read line
+
+	if err != nil {
+		fmt.Println("Last line that was read when error occured is", full_request, "end")
+		return response, err, full_request == ""
+	}
 
 	response = parseRequest([]byte(full_request), hosts_config)
 
-	return response, err
+	return response, err, false
 }
 
 // HandleBadRequest prepares res to be a 405 Method Not allowed response
@@ -427,6 +441,7 @@ func (res *Response) Write(w io.Writer) error {
 
 	statusLine := fmt.Sprintf("%v %v %v\r\n", res.Proto, res.StatusCode, statusText[res.StatusCode])
 	if _, err := bw.WriteString(statusLine); err != nil {
+		fmt.Println("Error in writing status line into connection")
 		return err
 	}
 
@@ -451,7 +466,7 @@ func (res *Response) Write(w io.Writer) error {
 		res.Headers["Connection"] = "close"
 	}
 
-	fmt.Println("status being received", res.StatusCode)
+	//fmt.Println("status being received", res.StatusCode)
 	if res.StatusCode == statusOK {
 
 		file_info, err := os.Stat(res.FilePath)
@@ -467,11 +482,17 @@ func (res *Response) Write(w io.Writer) error {
 		res.Headers["Content-Length"] = strconv.Itoa((int(file_info.Size())))
 
 		// write headers into buffer
-		sortAndWrite(res.Headers, bw)
-		// for key := range res.Headers {
-		// 	bw.WriteString(key + ": " + res.Headers[key] + "\r\n")
-		// }
-		bw.WriteString("\r\n")
+		//sortAndWrite(res.Headers, bw)
+		for key := range res.Headers {
+			_, err = bw.WriteString(key + ": " + res.Headers[key] + "\r\n")
+			if err != nil {
+				return err
+			}
+		}
+		_, err = bw.WriteString("\r\n")
+		if err != nil {
+			return err
+		}
 
 		fp, err := os.Open(res.FilePath)
 		if err != nil {
@@ -493,12 +514,16 @@ func (res *Response) Write(w io.Writer) error {
 
 			_, err = bw.Write(buf[:blen])
 
+			if err != nil {
+				return err
+			}
+
 		}
 
 	}
 
 	if err := bw.Flush(); err != nil {
-		return nil
+		return err
 	}
 
 	return nil
@@ -519,7 +544,7 @@ func ReadLine(br *bufio.Reader) (string, error) {
 	for {
 		//log.Println("for loop in read line")
 		s, err := br.ReadString('\n')
-		//log.Println("after read string in for loop")
+		//log.Println("line read", s, "size", br.Buffered())
 		line += s
 		// Return the error
 		if err != nil {
@@ -534,7 +559,7 @@ func ReadLine(br *bufio.Reader) (string, error) {
 	}
 }
 
-func sortAndWrite(slice map[string]string, bw *bufio.Writer) {
+func sortAndWrite(slice map[string]string, bw *bufio.Writer) (err error) {
 	var keys []string
 	for key := range slice {
 		keys = append(keys, key)
@@ -551,6 +576,10 @@ func sortAndWrite(slice map[string]string, bw *bufio.Writer) {
 
 	// print the sorted map
 	for key, value := range sortedMap {
-		bw.WriteString(key + ": " + value + "\r\n")
+		_, err := bw.WriteString(key + ": " + value + "\r\n")
+		if err != nil {
+			return err
+		}
 	}
+	return nil
 }
