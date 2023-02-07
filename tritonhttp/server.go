@@ -432,7 +432,7 @@ func (s *Server) ListenAndServe() error {
 	// Hint: create your listen socket and spawn off goroutines per incoming client
 	listenForClientConnections(s.Addr, s.VirtualHosts)
 
-	panic("todo")
+	//panic("todo")
 
 }
 
