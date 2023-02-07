@@ -425,14 +425,14 @@ func getHeaderLines(allLines []string) []string {
 
 // ListenAndServe listens on the TCP network address s.Addr and then
 // handles requests on incoming connections.
-func (s *Server) ListenAndServe() error {
+func (s *Server) ListenAndServe() error{
 
 	// Hint: Validate all docRoots
 
 	// Hint: create your listen socket and spawn off goroutines per incoming client
 	listenForClientConnections(s.Addr, s.VirtualHosts)
 
-	//panic("todo")
+	return nil
 
 }
 
