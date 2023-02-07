@@ -57,7 +57,7 @@ func listenForClientConnections(address string, hosts map[string]string) {
 	listener, err := net.Listen(Proto, address)
 	if err != nil {
 		fmt.Println("listen error")
-		os.Exit(1)
+		//os.Exit(1)
 	}
 	defer listener.Close()
 
