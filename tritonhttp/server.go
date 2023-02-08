@@ -92,7 +92,7 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 		// Set timeout
 		start := time.Now()
 		fmt.Println("*************BEGIN*************")
-		if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		if err := conn.SetReadDeadline(time.Now().Add(RECV_TIMEOUT)); err != nil {
 			fmt.Println("Failed to set timeout for connection", conn)
 			_ = conn.Close()
 			break
