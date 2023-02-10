@@ -113,7 +113,6 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 			log.Printf("Connection to %v timed out", conn.RemoteAddr())
 			// writing 400 into new response and closing connection
 			if !empty {
-				fmt.Println("Number of unread bytes in read_buffer", br.Size())
 				var response Response
 				response.HandleBadRequest()
 				err := response.Write(conn)
@@ -165,6 +164,11 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 		line, err := ReadLine(br)
 		if err != nil {
 			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
+			if line == "" {
+				//line is empty but still it is error since there is no complete request formed
+				fmt.Println("line is empty but still it is error since there is no complete request formed")
+				line = full_request
+			}
 			return line, err
 		}
 		if line == "" {
@@ -188,7 +192,7 @@ func ReadRequest(br *bufio.Reader, hosts_config map[string]string) (resp Respons
 	full_request, err := ReadRequest2(br) // when error occurs ReadRequest2 returns only the last read line
 
 	if err != nil {
-		fmt.Println("Last line that was read when error occured is", full_request, "end")
+		fmt.Println("Last line(s) that was read when error occured is", full_request, "end")
 		return response, err, full_request == ""
 	}
 
@@ -447,7 +451,7 @@ func (res *Response) Write(w io.Writer) error {
 
 	res.Headers["Date"] = FormatTime(time.Now())
 	if res.Request != nil {
-		if res.Request.Close{
+		if res.Request.Close {
 			res.Headers["Connection"] = "close"
 		}
 	} else {
@@ -506,16 +510,15 @@ func (res *Response) Write(w io.Writer) error {
 
 		//Not writing any other header only these 2
 
-		_, err := bw.WriteString("Connection" + ": " + "close" + "\r\n") 
+		_, err := bw.WriteString("Connection" + ": " + "close" + "\r\n")
 		if err != nil {
 			return err
 		}
 
 		_, err = bw.WriteString("Date" + ": " + res.Headers["Date"] + "\r\n\r\n") // adding one more \r\n in the end
-		if err != nil { 
+		if err != nil {
 			return err
 		}
-		
 
 	} else if res.StatusCode == statusFileNotFound {
 		sortAndWrite(res.Headers, bw)
