@@ -580,15 +580,11 @@ func sortAndWrite(slice map[string]string, bw *bufio.Writer) (err error) {
 	// sort the keys in ascending order
 	sort.Strings(keys)
 
-	// create a new map from the sorted keys
-	sortedMap := make(map[string]string)
-	for _, key := range keys {
-		sortedMap[key] = slice[key]
-	}
+
 
 	// print the sorted map
-	for key, value := range sortedMap {
-		_, err := bw.WriteString(key + ": " + value + "\r\n")
+	for _, key := range keys {
+		_, err := bw.WriteString(key + ": " + slice[key] + "\r\n")
 		if err != nil {
 			return err
 		}
