@@ -122,6 +122,7 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 				}
 			}
 			_ = conn.Close()
+			fmt.Println("**************END**************")
 			break
 		}
 
@@ -136,19 +137,18 @@ func handleClientConnection(conn net.Conn, hosts_config map[string]string) {
 
 		err = response.Write(conn)
 		if err != nil {
-			fmt.Println("error occured writing request into connection buffer:", err)
+			fmt.Println("error occured writing response into connection buffer:", err)
 		}
-		duration := time.Since(start)
-		fmt.Println("Time elapsed for this request is -->", duration)
-		if err != nil {
-			fmt.Println("Error writing into conn", err)
-		}
+
 		if response.Request != nil && response.Request.Close {
 			fmt.Println("Closing connection because of close header")
 			conn.Close()
+			fmt.Println("**************END**************")
 			break
 		}
 
+		duration := time.Since(start)
+		fmt.Println("Time elapsed for this request is -->", duration)
 		fmt.Println("**************END**************")
 
 	}
@@ -162,7 +162,6 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 
 	var full_request string
 	for {
-		//fmt.Println("for loop in read request 2")
 		line, err := ReadLine(br)
 		if err != nil {
 			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
@@ -448,12 +447,8 @@ func (res *Response) Write(w io.Writer) error {
 
 	res.Headers["Date"] = FormatTime(time.Now())
 	if res.Request != nil {
-		value, exists := res.Request.Headers["Connection"]
-		//fmt.Println("value of connection close", value)
-		if exists {
-			if value == "close" {
-				res.Headers["Connection"] = "close"
-			}
+		if res.Request.Close{
+			res.Headers["Connection"] = "close"
 		}
 	} else {
 		fmt.Println("Request in response object is nil!")
@@ -509,14 +504,18 @@ func (res *Response) Write(w io.Writer) error {
 
 	} else if res.StatusCode == statusBadRequest {
 
-		_, err := bw.WriteString("Date" + ": " + res.Headers["Date"] + "\r\n")
+		//Not writing any other header only these 2
+
+		_, err := bw.WriteString("Connection" + ": " + "close" + "\r\n") 
 		if err != nil {
 			return err
 		}
-		_, err = bw.WriteString("Connection" + ": " + "close" + "\r\n\r\n") // adding one more \r\n in the end
-		if err != nil {
+
+		_, err = bw.WriteString("Date" + ": " + res.Headers["Date"] + "\r\n\r\n") // adding one more \r\n in the end
+		if err != nil { 
 			return err
 		}
+		
 
 	} else if res.StatusCode == statusFileNotFound {
 		sortAndWrite(res.Headers, bw)
