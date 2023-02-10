@@ -164,7 +164,7 @@ func ReadRequest2(br *bufio.Reader) (req string, err error) {
 		line, err := ReadLine(br)
 		if err != nil {
 			fmt.Println("Error reading line in ", getCurrentFunctionName(), err)
-			if line == "" {
+			if line == "" && err != io.EOF {
 				//line is empty but still it is error since there is no complete request formed
 				fmt.Println("line is empty but still it is error since there is no complete request formed")
 				line = full_request
@@ -348,8 +348,13 @@ func checkFirstLineValid(line string, response *Response, host string, hosts map
 	arr := strings.Split(line, " ")
 
 	if len(arr) != 3 || (arr[0] != "GET") {
-		fmt.Println(len(arr) != 3, arr[0] != "GET")
 		fmt.Println("First line invalid")
+		response.HandleBadRequest()
+		return
+	}
+
+	if arr[2] != "HTTP/1.1" {
+		fmt.Println("First line invalid protocol")
 		response.HandleBadRequest()
 		return
 	}
